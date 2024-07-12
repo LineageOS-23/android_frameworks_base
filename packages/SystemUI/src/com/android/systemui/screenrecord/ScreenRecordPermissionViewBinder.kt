@@ -21,6 +21,9 @@ import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
 import android.hardware.display.DisplayManager
+import android.media.MediaCodecInfo
+import android.media.MediaCodecList
+import android.media.MediaFormat
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -104,6 +107,7 @@ class ScreenRecordPermissionViewBinder(
         ): ScreenRecordPermissionViewBinder
     }
 
+    private val hasHevcHwEncoder: Boolean = controller.hasHevcHwEncoder()
     private lateinit var tapsSwitch: Switch
     private lateinit var audioSwitch: Switch
     private lateinit var lowQualitySwitch: Switch
@@ -199,6 +203,12 @@ class ScreenRecordPermissionViewBinder(
             }
         options.isLongClickable = false
 
+        // Disable HEVC when hardware accelerated codec is not available
+        if (!hasHevcHwEncoder) {
+            val hevcView: View = containerView.requireViewById(R.id.show_hevc)
+            hevcView.visibility = View.GONE
+        }
+
         loadPrefs();
     }
 
@@ -230,7 +240,7 @@ class ScreenRecordPermissionViewBinder(
             else ScreenRecordingAudioSource.NONE
         val lowQuality = lowQualitySwitch.isChecked
         val longerDuration = longerDurationSwitch.isChecked
-        val hevc = hevcSwitch.isChecked
+        val hevc = hasHevcHwEncoder && hevcSwitch.isChecked
         val startIntent =
             PendingIntent.getForegroundService(
                 userContext,
@@ -279,7 +289,7 @@ class ScreenRecordPermissionViewBinder(
         audioSwitch.isChecked = Prefs.getInt(userContext, PREF_AUDIO, 0) == 1
         options.setSelection(Prefs.getInt(userContext, PREF_AUDIO_SOURCE, 0))
         skipTimeSwitch.isChecked = Prefs.getInt(userContext, PREF_SKIP, 0) == 1
-        hevcSwitch.isChecked = Prefs.getInt(userContext, PREF_HEVC, 1) == 1
+        hevcSwitch.isChecked = hasHevcHwEncoder && Prefs.getInt(userContext, PREF_HEVC, 1) == 1
     }
 
     private inner class CaptureTargetResultReceiver :
@@ -296,6 +306,19 @@ class ScreenRecordPermissionViewBinder(
                 requestScreenCapture(captureTarget)
             }
         }
+    }
+
+    private fun hasHevcHwEncoder(): Boolean {
+        val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+        for (codec: MediaCodecInfo in list.codecInfos) {
+            if (!codec.isEncoder || !codec.isHardwareAccelerated) continue
+            for (type in codec.supportedTypes) {
+                if (type.equals(MediaFormat.MIMETYPE_VIDEO_HEVC, ignoreCase = true)) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     companion object {
